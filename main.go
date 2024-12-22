@@ -1,322 +1,84 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
-	"discordxel/commands"
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
+	
+	"discordxel/commands"
 )
 
-type Transaction struct {
-	Type      string    `json:"type"`
-	Amount    float64   `json:"amount"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-type FinanceData struct {
-	Transactions []Transaction `json:"transactions"`
-}
-
-// Helper functions untuk membuat embed messages
-func createErrorEmbed(title, description string) *discordgo.MessageEmbed {
-	return &discordgo.MessageEmbed{
-		Title:       title,
-		Description: description,
-		Color:       0xFF0000, // Merah untuk error
-		Timestamp:   time.Now().Format(time.RFC3339),
-	}
-}
-
-func createSuccessEmbed(title, description string) *discordgo.MessageEmbed {
-	return &discordgo.MessageEmbed{
-		Title:       title,
-		Description: description,
-		Color:       0x00FF00, // Hijau untuk sukses
-		Timestamp:   time.Now().Format(time.RFC3339),
-	}
-}
-
-// Helper function untuk format uang Indonesia
-func formatRupiah(amount float64) string {
-	// Konversi ke string dengan 2 desimal
-	str := fmt.Sprintf("%.2f", amount)
-
-	// Pisahkan bagian desimal
-	parts := strings.Split(str, ".")
-
-	// Format ribuan untuk bagian integer
-	integer := parts[0]
-	length := len(integer)
-	var result []rune
-
-	for i, r := range integer {
-		if i != 0 && (length-i)%3 == 0 {
-			result = append(result, '.')
-		}
-		result = append(result, r)
-	}
-
-	// Gabungkan dengan bagian desimal, ganti titik dengan koma
-	return fmt.Sprintf("Rp%s,%s", string(result), parts[1])
-}
-
-func createTransactionEmbed(transType string, amount float64) *discordgo.MessageEmbed {
-	var (
-		title     string
-		color     int
-		thumbnail string
-	)
-
-	if transType == "masuk" {
-		title = "💰 Uang Masuk"
-		color = 0x00FF00
-		thumbnail = "https://cdn-icons-png.flaticon.com/512/2489/2489756.png"
-	} else {
-		title = "💸 Uang Keluar"
-		color = 0xFF6B6B
-		thumbnail = "https://cdn-icons-png.flaticon.com/512/2489/2489757.png"
-	}
-
-	return &discordgo.MessageEmbed{
-		Title:       title,
-		Description: fmt.Sprintf("**Jumlah:** %s", formatRupiah(amount)),
-		Color:       color,
-		Thumbnail: &discordgo.MessageEmbedThumbnail{
-			URL: thumbnail,
-		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "DevTest Finance Bot",
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-}
-
-func createSummaryEmbed(total float64, transactions []Transaction) *discordgo.MessageEmbed {
-	embed := &discordgo.MessageEmbed{
-		Title:       "📊 Ringkasan Keuangan",
-		Description: fmt.Sprintf("**Total Saldo:** %s", formatRupiah(total)),
-		Color:       0x3498DB,
-		Fields:      []*discordgo.MessageEmbedField{},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "DevTest Finance Bot",
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-
-	// Tambahkan field untuk 5 transaksi terakhir
-	if len(transactions) > 0 {
-		transactionList := "```\n"
-		start := len(transactions) - 5
-		if start < 0 {
-			start = 0
-		}
-
-		for i := start; i < len(transactions); i++ {
-			t := transactions[i]
-			symbol := "➕"
-			if t.Type == "keluar" {
-				symbol = "➖"
-			}
-			transactionList += fmt.Sprintf("%s %s (%s)\n",
-				symbol,
-				formatRupiah(t.Amount),
-				t.Timestamp.Format("02 Jan 2006 15:04"))
-		}
-		transactionList += "```"
-
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "📝 Riwayat Transaksi Terakhir",
-			Value:  transactionList,
-			Inline: false,
-		})
-	}
-
-	return embed
-}
-
-func createConfirmationEmbed() *discordgo.MessageEmbed {
-	return &discordgo.MessageEmbed{
-		Title:       "⚠️ Konfirmasi Penghapusan",
-		Description: "Apakah Anda yakin ingin menghapus **SEMUA** transaksi?\nData yang sudah dihapus **TIDAK DAPAT** dikembalikan!\n\nKetik `?confirmclear` untuk mengkonfirmasi penghapusan.",
-		Color:       0xFF9900, // Orange untuk warning
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Peringatan: Aksi ini tidak dapat dibatalkan!",
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-}
-
-func loadFinanceData() (*FinanceData, error) {
-	data, err := os.ReadFile("data.json")
-	if err != nil {
-		return &FinanceData{}, err
-	}
-
-	var financeData FinanceData
-	err = json.Unmarshal(data, &financeData)
-	if err != nil {
-		return &FinanceData{}, err
-	}
-
-	return &financeData, nil
-}
-
-func saveFinanceData(data *FinanceData) error {
-	jsonData, err := json.MarshalIndent(data, "", "    ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile("data.json", jsonData, 0644)
-}
-
-func handleTransaction(s *discordgo.Session, m *discordgo.MessageCreate, transType string, amount float64) {
-	financeData, err := loadFinanceData()
-	if err != nil {
-		s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed("Error", "Gagal memuat data: "+err.Error()), m.Reference())
-		return
-	}
-
-	transaction := Transaction{
-		Type:      transType,
-		Amount:    amount,
-		Timestamp: time.Now(),
-	}
-
-	financeData.Transactions = append(financeData.Transactions, transaction)
-	if err := saveFinanceData(financeData); err != nil {
-		s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed("Error", "Gagal menyimpan data: "+err.Error()), m.Reference())
-		return
-	}
-
-	s.ChannelMessageSendEmbedReply(m.ChannelID, createTransactionEmbed(transType, amount), m.Reference())
-}
-
-func init() {
+func main() {
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file:", err)
+		log.Fatal("Error loading .env file")
 	}
 
-	// Memuat role ID dari .env
-	roleIDsStr := os.Getenv("ALLOWED_ROLE_IDS")
-	if roleIDsStr == "" {
-		log.Fatal("ALLOWED_ROLE_IDS tidak ditemukan di .env")
-	}
-
-	// Update allowed roles di package commands
-	commands.AllowedRoles = strings.Split(roleIDsStr, ",")
-}
-
-func main() {
-	// Mengambil token dari .env
+	// Get Discord token from environment variable
 	token := os.Getenv("DISCORD_TOKEN")
 	if token == "" {
-		log.Fatal("DISCORD_TOKEN tidak ditemukan di .env")
+		log.Fatal("Discord token not found in .env file")
 	}
 
-	log.Println("Starting bot, please wait a moment...")
-
-	discord, err := discordgo.New("Bot " + token)
-	discord.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
-
+	// Create new Discord session
+	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Error creating Discord session:", err)
 	}
 
-	discord.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		if m.Author.Bot || !strings.HasPrefix(m.Content, "?") {
-			return
-		}
+	// Register messageCreate as a callback for the messageCreate events
+	dg.AddHandler(messageCreate)
 
-		args := strings.Fields(m.Content[1:])
-		if len(args) < 1 {
-			return
-		}
-
-		command := strings.ToLower(args[0])
-
-		switch command {
-		case "uangmasuk", "uangkeluar":
-			if len(args) != 2 {
-				s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed(
-					"Format Salah",
-					fmt.Sprintf("Gunakan: ?%s <jumlah>", command),
-				), m.Reference())
-				return
-			}
-
-			amount, err := strconv.ParseFloat(args[1], 64)
-			if err != nil {
-				s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed(
-					"Input Tidak Valid",
-					"Jumlah harus berupa angka",
-				), m.Reference())
-				return
-			}
-
-			transType := "masuk"
-			if command == "uangkeluar" {
-				transType = "keluar"
-			}
-
-			handleTransaction(s, m, transType, amount)
-
-		case "totaluang":
-			financeData, err := loadFinanceData()
-			if err != nil {
-				s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed("Error", "Gagal memuat data: "+err.Error()), m.Reference())
-				return
-			}
-
-			var total float64
-			for _, t := range financeData.Transactions {
-				if t.Type == "masuk" {
-					total += t.Amount
-				} else {
-					total -= t.Amount
-				}
-			}
-
-			s.ChannelMessageSendEmbedReply(m.ChannelID, createSummaryEmbed(total, financeData.Transactions), m.Reference())
-
-		case "cleartransaksi":
-			s.ChannelMessageSendEmbedReply(m.ChannelID, createConfirmationEmbed(), m.Reference())
-
-		case "confirmclear":
-			// Reset data.json ke array kosong
-			emptyData := &FinanceData{
-				Transactions: []Transaction{},
-			}
-
-			if err := saveFinanceData(emptyData); err != nil {
-				s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed(
-					"Error",
-					"Gagal menghapus data: "+err.Error(),
-				), m.Reference())
-				return
-			}
-
-			successEmbed := createSuccessEmbed(
-				"🗑️ Data Berhasil Dihapus",
-				"Semua transaksi telah dihapus dari sistem.",
-			)
-			s.ChannelMessageSendEmbedReply(m.ChannelID, successEmbed, m.Reference())
-		}
-	})
-
-	err = discord.Open()
+	// Open a websocket connection to Discord
+	err = dg.Open()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Error opening connection:", err)
 	}
 
-	log.Println("Bot is now running perfectly boss.")
-	select {}
+	fmt.Println("Bot is now running. Press CTRL-C to exit.")
+	sc := make(chan os.Signal, 1)
+	<-sc
+
+	// Close Discord session
+	dg.Close()
+}
+
+func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Ignore messages from the bot itself
+	if m.Author.ID == s.State.User.ID {
+		return
+	}
+
+	// Check if message starts with "?"
+	if !strings.HasPrefix(m.Content, "?") {
+		return
+	}
+
+	// Split the message into command and arguments
+	args := strings.Fields(m.Content[1:])
+	if len(args) == 0 {
+		return
+	}
+
+	command := strings.ToLower(args[0])
+
+	// Handle commands
+	switch command {
+	case "help", "h", "bantuan", "?":
+		commands.HandleFinanceCommand(s, m, "help", args)
+	case "uangmasuk", "um", "in", "masuk":
+		commands.HandleFinanceCommand(s, m, "uangmasuk", args)
+	case "uangkeluar", "uk", "out", "keluar":
+		commands.HandleFinanceCommand(s, m, "uangkeluar", args)
+	case "totaluang", "tu", "total", "saldo":
+		commands.HandleFinanceCommand(s, m, "totaluang", args)
+	case "cleartransaksi", "ct", "clear", "hapus":
+		commands.HandleFinanceCommand(s, m, "cleartransaksi", args)
+	case "confirmclear", "cc", "confirm":
+		commands.HandleFinanceCommand(s, m, "confirmclear", args)
+	}
 }
