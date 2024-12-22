@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/joho/godotenv"
 )
 
 type Transaction struct {
@@ -197,8 +198,20 @@ func handleTransaction(s *discordgo.Session, m *discordgo.MessageCreate, transTy
 	s.ChannelMessageSendEmbedReply(m.ChannelID, createTransactionEmbed(transType, amount), m.Reference())
 }
 
+func init() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file:", err)
+	}
+}
+
 func main() {
-	token := "MTMwOTk4NjYzMjE2NjAxOTEwNA.Gmxusz.jUEBU6w_Fv-d73wFTxidV-zNO2mKw7rN_VJJuk"
+	// Mengambil token dari .env
+	token := os.Getenv("DISCORD_TOKEN")
+	if token == "" {
+		log.Fatal("DISCORD_TOKEN tidak ditemukan di .env")
+	}
+
 	log.Println("Starting bot...")
 
 	discord, err := discordgo.New("Bot " + token)
