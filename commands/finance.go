@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -229,6 +230,40 @@ func createConfirmationEmbed() *discordgo.MessageEmbed {
 	return embed
 }
 
+// createHelpEmbed membuat embed untuk bantuan command
+func createHelpEmbed() *discordgo.MessageEmbed {
+	embed := createBaseEmbed("📚 Bantuan Command", colorInfo)
+	
+	var description strings.Builder
+	description.WriteString("Berikut adalah daftar command yang tersedia:\n\n")
+	
+	// Urutkan command berdasarkan abjad
+	var commands []string
+	for cmd := range CommandDescriptions {
+		commands = append(commands, cmd)
+	}
+	sort.Strings(commands)
+	
+	// Buat daftar command dengan deskripsi dan alias
+	for _, cmd := range commands {
+		description.WriteString(fmt.Sprintf("**?%s**\n", cmd))
+		description.WriteString(fmt.Sprintf("└ %s\n", CommandDescriptions[cmd]))
+		if aliases := CommandAliases[cmd]; len(aliases) > 0 {
+			description.WriteString(fmt.Sprintf("└ Alias: ?%s\n", strings.Join(aliases, ", ?")))
+		}
+		description.WriteString("\n")
+	}
+	
+	embed.Description = description.String()
+	
+	// Tambahkan footer dengan informasi tambahan
+	embed.Footer = &discordgo.MessageEmbedFooter{
+		Text: "Gunakan command dengan prefix '?' | Contoh: ?um 10000",
+	}
+	
+	return embed
+}
+
 // loadFinanceData membaca dan parse data keuangan dari file JSON
 func loadFinanceData() (*FinanceData, error) {
 	data, err := os.ReadFile(dataFile)
@@ -296,6 +331,43 @@ func calculateTotal(transactions []Transaction) float64 {
 	return total
 }
 
+// Konstanta untuk command dan aliasnya
+var (
+	// Map command ke alias
+	CommandAliases = map[string][]string{
+		"help":           {"h", "bantuan", "?"},
+		"uangmasuk":      {"um", "in", "masuk"},
+		"uangkeluar":     {"uk", "out", "keluar"},
+		"totaluang":      {"tu", "total", "saldo"},
+		"cleartransaksi": {"ct", "clear", "hapus"},
+		"confirmclear":   {"cc", "confirm"},
+	}
+
+	// Map command ke deskripsi
+	CommandDescriptions = map[string]string{
+		"help":           "Menampilkan daftar command yang tersedia",
+		"uangmasuk":      "Mencatat uang masuk. Contoh: ?um 10000",
+		"uangkeluar":     "Mencatat uang keluar. Contoh: ?uk 5000",
+		"totaluang":      "Menampilkan total saldo dan riwayat transaksi. Contoh: ?tu [halaman]",
+		"cleartransaksi": "Memulai proses penghapusan semua transaksi",
+		"confirmclear":   "Mengkonfirmasi penghapusan semua transaksi",
+	}
+
+	// Map alias ke command utama
+	AliasToCommand = make(map[string]string)
+)
+
+func init() {
+	// Inisialisasi map alias ke command
+	for cmd, aliases := range CommandAliases {
+		for _, alias := range aliases {
+			AliasToCommand[alias] = cmd
+		}
+		// Command utama juga bisa digunakan
+		AliasToCommand[cmd] = cmd
+	}
+}
+
 // HandleFinanceCommand menangani semua command keuangan
 func HandleFinanceCommand(s *discordgo.Session, m *discordgo.MessageCreate, command string, args []string) {
 	// Verifikasi role user
@@ -316,12 +388,28 @@ func HandleFinanceCommand(s *discordgo.Session, m *discordgo.MessageCreate, comm
 		return
 	}
 
+	// Cek apakah command adalah alias, jika ya gunakan command utamanya
+	if mainCmd, ok := AliasToCommand[command]; ok {
+		command = mainCmd
+	} else {
+		s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed(
+			"Command Tidak Valid",
+			"Command tidak dikenali. Ketik ?help untuk melihat daftar command yang tersedia.",
+		), m.Reference())
+		return
+	}
+
 	switch command {
+	case "help":
+		s.ChannelMessageSendEmbedReply(m.ChannelID, createHelpEmbed(), m.Reference())
+		return
+
 	case "uangmasuk", "uangkeluar":
 		if len(args) != 2 {
 			s.ChannelMessageSendEmbedReply(m.ChannelID, createErrorEmbed(
 				"Format Salah",
-				fmt.Sprintf("Gunakan: ?%s <jumlah>", command),
+				fmt.Sprintf("Gunakan: ?%s <jumlah> atau alias: %s", 
+					command, getCommandAliases(command)),
 			), m.Reference())
 			return
 		}
@@ -377,4 +465,21 @@ func HandleFinanceCommand(s *discordgo.Session, m *discordgo.MessageCreate, comm
 			"Semua transaksi telah dihapus dari sistem.",
 		), m.Reference())
 	}
+}
+
+// getCommandList mengembalikan daftar command dan aliasnya
+func getCommandList() string {
+	var result strings.Builder
+	for cmd, aliases := range CommandAliases {
+		result.WriteString(fmt.Sprintf("• ?%s (%s)\n", cmd, strings.Join(aliases, ", ")))
+	}
+	return result.String()
+}
+
+// getCommandAliases mengembalikan daftar alias untuk command tertentu
+func getCommandAliases(command string) string {
+	if aliases, ok := CommandAliases[command]; ok {
+		return "?" + strings.Join(aliases, ", ?")
+	}
+	return ""
 }
