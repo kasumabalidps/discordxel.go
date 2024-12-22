@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"discordxel/commands"
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
-	"./commands"
 )
 
 type Transaction struct {
