@@ -1,0 +1,14 @@
+{
+    "transactions": [
+        {
+            "type": "masuk",
+            "amount": 10000,
+            "timestamp": "2024-12-23T01:41:42.6084965+08:00"
+        },
+        {
+            "type": "keluar",
+            "amount": 7500,
+            "timestamp": "2024-12-23T01:53:24.3896661+08:00"
+        }
+    ]
+}
