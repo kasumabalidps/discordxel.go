@@ -11,6 +11,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
+	"./commands"
 )
 
 type Transaction struct {
@@ -203,6 +204,15 @@ func init() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file:", err)
 	}
+
+	// Memuat role ID dari .env
+	roleIDsStr := os.Getenv("ALLOWED_ROLE_IDS")
+	if roleIDsStr == "" {
+		log.Fatal("ALLOWED_ROLE_IDS tidak ditemukan di .env")
+	}
+
+	// Update allowed roles di package commands
+	commands.AllowedRoles = strings.Split(roleIDsStr, ",")
 }
 
 func main() {
@@ -212,7 +222,7 @@ func main() {
 		log.Fatal("DISCORD_TOKEN tidak ditemukan di .env")
 	}
 
-	log.Println("Starting bot...")
+	log.Println("Starting bot, please wait a moment...")
 
 	discord, err := discordgo.New("Bot " + token)
 	discord.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
